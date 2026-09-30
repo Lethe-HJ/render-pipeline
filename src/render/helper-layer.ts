@@ -1,8 +1,12 @@
 import { Layer, type Canvas2DContext } from './layer'
+import type { PrimitiveRenderOptions } from './renderer-types'
 
-const SIMULATED_PIXEL_SIZE = 20
-
-function drawPixelHelper(context: Canvas2DContext, width: number, height: number): void {
+function drawPixelHelper(
+  context: Canvas2DContext,
+  width: number,
+  height: number,
+  { vertices, pixelRatio, drawGrid, drawPrimitiveConnections }: PrimitiveRenderOptions,
+): void {
   context.fillStyle = '#101827'
   context.fillRect(0, 0, width, height)
 
@@ -12,35 +16,48 @@ function drawPixelHelper(context: Canvas2DContext, width: number, height: number
   context.fillStyle = glow
   context.fillRect(0, 0, width, height)
 
+  if (drawGrid) {
+    context.beginPath()
+    for (let x = pixelRatio; x < width; x += pixelRatio) {
+      context.moveTo(x + 0.5, 0)
+      context.lineTo(x + 0.5, height)
+    }
+    for (let y = pixelRatio; y < height; y += pixelRatio) {
+      context.moveTo(0, y + 0.5)
+      context.lineTo(width, y + 0.5)
+    }
+    context.strokeStyle = 'rgba(151, 180, 199, 0.16)'
+    context.lineWidth = 1
+    context.stroke()
+  }
+
   context.beginPath()
-  for (let x = SIMULATED_PIXEL_SIZE; x < width; x += SIMULATED_PIXEL_SIZE) {
-    context.moveTo(x + 0.5, 0)
-    context.lineTo(x + 0.5, height)
+  for (const [index, vertex] of vertices.entries()) {
+    const x = vertex.x * width
+    const y = vertex.y * height
+    if (index === 0) context.moveTo(x, y)
+    else context.lineTo(x, y)
   }
-  for (let y = SIMULATED_PIXEL_SIZE; y < height; y += SIMULATED_PIXEL_SIZE) {
-    context.moveTo(0, y + 0.5)
-    context.lineTo(width, y + 0.5)
+  context.closePath()
+  context.fillStyle = 'rgba(61, 214, 190, 0.16)'
+  context.fill()
+  if (drawPrimitiveConnections) {
+    context.strokeStyle = 'rgba(61, 214, 190, 0.8)'
+    context.lineWidth = 1
+    context.stroke()
   }
-  context.strokeStyle = 'rgba(151, 180, 199, 0.16)'
-  context.lineWidth = 1
-  context.stroke()
 }
 
-export class HelperLayer extends Layer {
+export class HelperRenderer extends Layer {
+  private readonly options: PrimitiveRenderOptions
+
+  constructor(width: number, height: number, options: PrimitiveRenderOptions) {
+    super(width, height)
+    this.options = options
+  }
+
   render(): void {
     this.context.clearRect(0, 0, this.width, this.height)
-    drawPixelHelper(this.context, this.width, this.height)
+    drawPixelHelper(this.context, this.width, this.height, this.options)
   }
-}
-
-export function pixelHelperRenderer(target: HTMLCanvasElement): void {
-  const helperLayer = new HelperLayer(target.width, target.height)
-  helperLayer.render()
-
-  const context = target.getContext('2d')
-  if (!context) {
-    throw new Error('无法创建页面 canvas 的 2D 渲染上下文')
-  }
-  context.clearRect(0, 0, target.width, target.height)
-  context.drawImage(helperLayer.offscreenCanvas, 0, 0)
 }

@@ -1,24 +1,15 @@
 import { Layer, type Canvas2DContext } from './layer'
+import type { NormalizedVertex, PrimitiveRenderOptions, VertexColor } from './renderer-types'
 
-const SIMULATED_PIXEL_SIZE = 20
-
-type Color = [number, number, number]
-
-interface VertexInput {
-  x: number
-  y: number
-  color: Color
-}
-
-interface VertexOutput extends VertexInput {}
+interface VertexOutput extends NormalizedVertex {}
 
 interface FragmentInput {
   x: number
   y: number
-  color: Color
+  color: VertexColor
 }
 
-function vertexShader(vertex: VertexInput, width: number, height: number): VertexOutput {
+function vertexShader(vertex: NormalizedVertex, width: number, height: number): VertexOutput {
   return {
     ...vertex,
     x: vertex.x * width,
@@ -50,6 +41,7 @@ function fragmentShader(fragment: FragmentInput): string {
 function rasterizeTriangle(
   context: Canvas2DContext,
   triangle: [VertexOutput, VertexOutput, VertexOutput],
+  pixelRatio: number,
 ): void {
   const [first, second, third] = triangle
   const area = edge(first, second, third.x, third.y)
@@ -57,13 +49,13 @@ function rasterizeTriangle(
   const maxX = Math.ceil(Math.max(first.x, second.x, third.x))
   const minY = Math.max(0, Math.floor(Math.min(first.y, second.y, third.y)))
   const maxY = Math.ceil(Math.max(first.y, second.y, third.y))
-  const startX = Math.floor(minX / SIMULATED_PIXEL_SIZE) * SIMULATED_PIXEL_SIZE
-  const startY = Math.floor(minY / SIMULATED_PIXEL_SIZE) * SIMULATED_PIXEL_SIZE
+  const startX = Math.floor(minX / pixelRatio) * pixelRatio
+  const startY = Math.floor(minY / pixelRatio) * pixelRatio
 
-  for (let y = startY; y <= maxY; y += SIMULATED_PIXEL_SIZE) {
-    for (let x = startX; x <= maxX; x += SIMULATED_PIXEL_SIZE) {
-      const sampleX = x + SIMULATED_PIXEL_SIZE / 2
-      const sampleY = y + SIMULATED_PIXEL_SIZE / 2
+  for (let y = startY; y <= maxY; y += pixelRatio) {
+    for (let x = startX; x <= maxX; x += pixelRatio) {
+      const sampleX = x + pixelRatio / 2
+      const sampleY = y + pixelRatio / 2
       const firstWeight = edge(second, third, sampleX, sampleY) / area
       const secondWeight = edge(third, first, sampleX, sampleY) / area
       const thirdWeight = edge(first, second, sampleX, sampleY) / area
@@ -74,27 +66,32 @@ function rasterizeTriangle(
         channel * firstWeight
         + second.color[index] * secondWeight
         + third.color[index] * thirdWeight,
-      ) as Color
+      ) as VertexColor
       const colorStyle = fragmentShader({ x: sampleX, y: sampleY, color })
 
       context.beginPath()
-      context.arc(sampleX, sampleY, SIMULATED_PIXEL_SIZE * 0.2, 0, Math.PI * 2)
+      context.arc(sampleX, sampleY, pixelRatio * 0.2, 0, Math.PI * 2)
       context.fillStyle = colorStyle
       context.fill()
     }
   }
 }
 
-export class PipeLineLayer extends Layer {
+export class PipeLineRenderer extends Layer {
+  private readonly options: PrimitiveRenderOptions
+
+  constructor(width: number, height: number, options: PrimitiveRenderOptions) {
+    super(width, height)
+    this.options = options
+  }
+
   render(): void {
     this.context.clearRect(0, 0, this.width, this.height)
-    const vertexInputs: VertexInput[] = [
-      { x: 0.5, y: 0.18, color: [61, 214, 190] },
-      { x: 0.8, y: 0.78, color: [111, 188, 255] },
-      { x: 0.2, y: 0.78, color: [232, 126, 255] },
-    ]
-    const vertexOutputs = vertexInputs.map((vertex) => vertexShader(vertex, this.width, this.height))
+    if (this.options.primitiveType !== 'triangle') {
+      throw new Error(`不支持的图元类型: ${this.options.primitiveType}`)
+    }
+    const vertexOutputs = this.options.vertices.map((vertex) => vertexShader(vertex, this.width, this.height))
     const triangle = assembleTriangle(vertexOutputs)
-    rasterizeTriangle(this.context, triangle)
+    rasterizeTriangle(this.context, triangle, this.options.pixelRatio)
   }
 }

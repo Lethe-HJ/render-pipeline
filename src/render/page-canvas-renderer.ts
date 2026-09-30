@@ -1,5 +1,5 @@
-import { HelperLayer } from './helper-layer'
-import { PipeLineLayer } from './pipeline-layer'
+import { HelperRenderer } from './helper-layer'
+import { PipeLineRenderer } from './pipeline-layer'
 
 export class PageCanvasRenderer {
   private readonly target: HTMLCanvasElement
@@ -8,7 +8,7 @@ export class PageCanvasRenderer {
     this.target = target
   }
 
-  render(helperLayer: HelperLayer, pipeLineLayer: PipeLineLayer): void {
+  render(helperLayer: HelperRenderer, pipeLineLayer: PipeLineRenderer): void {
     const context = this.target.getContext('2d')
     if (!context) {
       throw new Error('无法创建页面 canvas 的 2D 渲染上下文')
