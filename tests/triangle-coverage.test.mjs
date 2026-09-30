@@ -46,10 +46,10 @@ test('WASM batches coverage and barycentric weights for arbitrary triangles', ()
     true,
   )
 
-  assert.equal(result.insideCount, 3)
+  assert.equal(result.insideCount, 1)
   assert.deepEqual([...result.weights.slice(0, 3)], [0.5, 0.25, 0.25])
-  assert.ok(Math.abs(result.weights[3]) < Number.EPSILON)
-  assert.ok(Math.abs(result.weights[6]) < Number.EPSILON)
+  assert.equal(result.weights[3], -1)
+  assert.equal(result.weights[6], -1)
   assert.equal(result.weights[9], -1)
 
   const reversed = rasterize(
@@ -68,7 +68,7 @@ test('benchmarks a full WASM coverage pass', (context) => {
   const gridSize = 1024
   const triangle = [{ x: 0, y: 0 }, { x: gridSize, y: 0 }, { x: 0, y: gridSize }]
   const scan = () => rasterize(triangle, { x: 0, y: 0 }, 1, gridSize, gridSize).insideCount
-  const expectedCount = (gridSize * (gridSize + 1)) / 2
+  const expectedCount = (gridSize * (gridSize - 1)) / 2
 
   for (let warmup = 0; warmup < 3; warmup += 1) {
     assert.equal(scan(), expectedCount)

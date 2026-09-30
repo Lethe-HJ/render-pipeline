@@ -7,11 +7,18 @@ fn edge(start: (f64, f64), end: (f64, f64), x: f64, y: f64) -> f64 {
 }
 
 #[inline]
-fn is_inside(area: f64, first_edge: f64, second_edge: f64, third_edge: f64) -> bool {
-    if area > 0.0 {
-        first_edge >= 0.0 && second_edge >= 0.0 && third_edge >= 0.0
-    } else if area < 0.0 {
-        first_edge <= 0.0 && second_edge <= 0.0 && third_edge <= 0.0
+fn is_top_left(start: (f64, f64), end: (f64, f64)) -> bool {
+    let delta_y = end.1 - start.1;
+    let delta_x = end.0 - start.0;
+    delta_y < 0.0 || (delta_y == 0.0 && delta_x > 0.0)
+}
+
+#[inline]
+fn is_edge_inside(area: f64, value: f64, start: (f64, f64), end: (f64, f64)) -> bool {
+    if area < 0.0 {
+        value < 0.0 || (value == 0.0 && is_top_left(start, end))
+    } else if area > 0.0 {
+        value > 0.0 || (value == 0.0 && is_top_left(end, start))
     } else {
         false
     }
@@ -51,7 +58,10 @@ fn rasterize_triangle_into(
             let third_edge = edge(first, second, sample_x, sample_y);
             let output_index = ((row * columns + column) * 3) as usize;
 
-            if is_inside(area, first_edge, second_edge, third_edge) {
+            if is_edge_inside(area, first_edge, second, third)
+                && is_edge_inside(area, second_edge, third, first)
+                && is_edge_inside(area, third_edge, first, second)
+            {
                 output[output_index] = first_edge * inverse_area;
                 output[output_index + 1] = second_edge * inverse_area;
                 output[output_index + 2] = third_edge * inverse_area;
@@ -147,10 +157,10 @@ mod tests {
             &mut output,
         );
 
-        assert_eq!(inside_count, 3);
+        assert_eq!(inside_count, 1);
         assert_eq!(&output[0..3], &[0.5, 0.25, 0.25]);
-        assert_eq!(output[3], 0.0);
-        assert_eq!(output[6], 0.0);
+        assert_eq!(output[3], -1.0);
+        assert_eq!(output[6], -1.0);
         assert_eq!(output[9], -1.0);
     }
 
@@ -178,5 +188,33 @@ mod tests {
         );
         assert_eq!(degenerate_count, 0);
         assert_eq!(output[0], -1.0);
+    }
+
+    #[test]
+    fn applies_top_left_rule_to_shared_edges() {
+        let mut first_output = [0.0; 12];
+        let mut second_output = [0.0; 12];
+        let first_count = rasterize_triangle_into(
+            [(0.0, 0.0), (8.0, 0.0), (8.0, 8.0)],
+            (0.0, 0.0),
+            4.0,
+            2,
+            2,
+            &mut first_output,
+        );
+        let second_count = rasterize_triangle_into(
+            [(0.0, 0.0), (8.0, 8.0), (0.0, 8.0)],
+            (0.0, 0.0),
+            4.0,
+            2,
+            2,
+            &mut second_output,
+        );
+
+        assert_eq!(first_count + second_count, 4);
+        assert!(first_output[0] >= 0.0);
+        assert_eq!(second_output[0], -1.0);
+        assert!(first_output[9] >= 0.0);
+        assert_eq!(second_output[9], -1.0);
     }
 }
