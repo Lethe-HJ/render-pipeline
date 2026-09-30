@@ -7,8 +7,16 @@ export interface NormalizedVertex {
   color: VertexColor
 }
 
+export interface NormalizedPoint {
+  x: number
+  y: number
+}
+
+export type PolygonPath = NormalizedPoint[]
+
 export interface PrimitiveRenderOptions {
   vertices: NormalizedVertex[]
+  paths?: PolygonPath[]
   primitiveType: PrimitiveType
   pixelRatio: number
   drawGrid: boolean

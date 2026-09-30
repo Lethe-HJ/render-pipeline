@@ -1,5 +1,6 @@
 import { HelperRenderer } from './helper-renderer'
 import { PipeLineRenderer } from './pipeline-renderer'
+import { assemblePrimitivePaths } from './primitive-assembler'
 import type { Canvas2dRenderOptions } from './renderer-types'
 
 export class PageCanvasRenderer {
@@ -17,11 +18,14 @@ export class PageCanvasRenderer {
       throw new Error('pixelRatio 必须是大于 0 的有限数值')
     }
 
+    const paths = assemblePrimitivePaths(options)
+    const renderOptions = { ...options, paths }
+
     this.target.width = width
     this.target.height = height
 
-    const helperRenderer = new HelperRenderer(width, height, options)
-    const pipeLineRenderer = new PipeLineRenderer(width, height, options)
+    const helperRenderer = new HelperRenderer(width, height, renderOptions)
+    const pipeLineRenderer = new PipeLineRenderer(width, height, renderOptions)
     helperRenderer.render()
     await pipeLineRenderer.render()
 

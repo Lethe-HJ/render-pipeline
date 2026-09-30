@@ -8,37 +8,53 @@ const wasmBytes = await readFile(wasmPath)
 const { instance } = await WebAssembly.instantiate(wasmBytes)
 const wasm = instance.exports
 
-function rasterize(triangle, start, step, columns, rows, copyWeights = false) {
+function rasterize(paths, start, step, columns, rows, copyCoverage = false) {
   const sampleCount = columns * rows
-  const pointer = wasm.allocate_weights(sampleCount)
-  assert.notEqual(pointer, 0)
+  const points = paths.flat()
+  const ends = []
+  let pointCount = 0
+  for (const path of paths) {
+    pointCount += path.length
+    ends.push(pointCount)
+  }
+  const pointsPointer = wasm.allocate_points(pointCount)
+  const endsPointer = wasm.allocate_path_ends(paths.length)
+  const coveragePointer = wasm.allocate_coverage(sampleCount)
+  assert.notEqual(pointsPointer, 0)
+  assert.notEqual(endsPointer, 0)
+  assert.notEqual(coveragePointer, 0)
 
   try {
-    const [first, second, third] = triangle
-    const insideCount = wasm.rasterize_triangle(
-      first.x,
-      first.y,
-      second.x,
-      second.y,
-      third.x,
-      third.y,
+    const pointValues = new Float64Array(wasm.memory.buffer, pointsPointer, pointCount * 2)
+    points.forEach(({ x, y }, index) => {
+      pointValues[index * 2] = x
+      pointValues[index * 2 + 1] = y
+    })
+    new Uint32Array(wasm.memory.buffer, endsPointer, paths.length).set(ends)
+    const insideCount = wasm.rasterize_paths(
+      pointsPointer,
+      pointCount,
+      endsPointer,
+      paths.length,
       start.x,
       start.y,
       step,
       columns,
       rows,
-      pointer,
+      coveragePointer,
     )
-    const weights = new Float64Array(wasm.memory.buffer, pointer, sampleCount * 3)
-    return { insideCount, weights: copyWeights ? weights.slice() : weights }
+    const coverage = new Uint8Array(wasm.memory.buffer, coveragePointer, sampleCount)
+    return { insideCount, coverage: copyCoverage ? coverage.slice() : coverage }
   } finally {
-    wasm.deallocate_weights(pointer, sampleCount)
+    wasm.deallocate_points(pointsPointer, pointCount)
+    wasm.deallocate_path_ends(endsPointer, paths.length)
+    wasm.deallocate_coverage(coveragePointer, sampleCount)
   }
 }
 
-test('WASM batches coverage and barycentric weights for arbitrary triangles', () => {
+test('WASM batches point-in-polygon coverage for arbitrary paths', () => {
   const result = rasterize(
-    [{ x: 0, y: 0 }, { x: 8, y: 0 }, { x: 0, y: 8 }],
+    [[{ x: 0, y: 0 }, { x: 8, y: 0 }, { x: 0, y: 8 }]],
     { x: 0, y: 0 },
     4,
     2,
@@ -46,14 +62,11 @@ test('WASM batches coverage and barycentric weights for arbitrary triangles', ()
     true,
   )
 
-  assert.equal(result.insideCount, 1)
-  assert.deepEqual([...result.weights.slice(0, 3)], [0.5, 0.25, 0.25])
-  assert.equal(result.weights[3], -1)
-  assert.equal(result.weights[6], -1)
-  assert.equal(result.weights[9], -1)
+  assert.equal(result.insideCount, 3)
+  assert.deepEqual([...result.coverage], [1, 1, 1, 0])
 
   const reversed = rasterize(
-    [{ x: 0, y: 8 }, { x: 8, y: 0 }, { x: 0, y: 0 }],
+    [[{ x: 0, y: 8 }, { x: 8, y: 0 }, { x: 0, y: 0 }]],
     { x: 0, y: 0 },
     4,
     1,
@@ -61,14 +74,30 @@ test('WASM batches coverage and barycentric weights for arbitrary triangles', ()
     true,
   )
   assert.equal(reversed.insideCount, 1)
-  assert.ok(Math.abs(reversed.weights.reduce((sum, weight) => sum + weight, 0) - 1) < Number.EPSILON)
+  assert.deepEqual([...reversed.coverage], [1])
+})
+
+test('WASM treats additional paths as holes regardless of winding', () => {
+  const result = rasterize(
+    [
+      [{ x: 0, y: 0 }, { x: 12, y: 0 }, { x: 12, y: 12 }, { x: 0, y: 12 }],
+      [{ x: 4, y: 4 }, { x: 8, y: 4 }, { x: 8, y: 8 }, { x: 4, y: 8 }],
+    ],
+    { x: 0, y: 0 },
+    4,
+    3,
+    3,
+    true,
+  )
+  assert.equal(result.insideCount, 8)
+  assert.equal(result.coverage[4], 0)
 })
 
 test('benchmarks a full WASM coverage pass', (context) => {
   const gridSize = 1024
-  const triangle = [{ x: 0, y: 0 }, { x: gridSize, y: 0 }, { x: 0, y: gridSize }]
+  const triangle = [[{ x: 0, y: 0 }, { x: gridSize, y: 0 }, { x: 0, y: gridSize }]]
   const scan = () => rasterize(triangle, { x: 0, y: 0 }, 1, gridSize, gridSize).insideCount
-  const expectedCount = (gridSize * (gridSize - 1)) / 2
+  const expectedCount = (gridSize * (gridSize + 1)) / 2
 
   for (let warmup = 0; warmup < 3; warmup += 1) {
     assert.equal(scan(), expectedCount)
@@ -84,5 +113,5 @@ test('benchmarks a full WASM coverage pass', (context) => {
   }
 
   context.diagnostic(`Rust/WASM best of ${repetitions}: ${bestMilliseconds.toFixed(3)} ms`)
-  context.diagnostic(`grid: ${gridSize * gridSize} samples; output: 3 Float64 weights per sample`)
+  context.diagnostic(`grid: ${gridSize * gridSize} samples; output: 1 coverage byte per sample`)
 })

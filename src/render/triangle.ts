@@ -4,6 +4,8 @@ export { PipeLineRenderer } from './pipeline-renderer'
 export type {
   Canvas2dRenderOptions,
   NormalizedVertex,
+  NormalizedPoint,
+  PolygonPath,
   PrimitiveRenderOptions,
   PrimitiveType,
   VertexColor,

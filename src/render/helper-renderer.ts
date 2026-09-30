@@ -5,7 +5,7 @@ function drawPixelHelper(
   context: Canvas2DContext,
   width: number,
   height: number,
-  { vertices, pixelRatio, drawGrid, drawPrimitiveConnections }: PrimitiveRenderOptions,
+  { vertices, paths, pixelRatio, drawGrid, drawPrimitiveConnections }: PrimitiveRenderOptions,
 ): void {
   context.fillStyle = '#101827'
   context.fillRect(0, 0, width, height)
@@ -32,15 +32,17 @@ function drawPixelHelper(
   }
 
   context.beginPath()
-  for (const [index, vertex] of vertices.entries()) {
-    const x = vertex.x * width
-    const y = vertex.y * height
-    if (index === 0) context.moveTo(x, y)
-    else context.lineTo(x, y)
+  for (const path of paths ?? [vertices]) {
+    for (const [index, point] of path.entries()) {
+      const x = point.x * width
+      const y = point.y * height
+      if (index === 0) context.moveTo(x, y)
+      else context.lineTo(x, y)
+    }
+    context.closePath()
   }
-  context.closePath()
   context.fillStyle = 'rgba(61, 214, 190, 0.16)'
-  context.fill()
+  context.fill('evenodd')
   if (drawPrimitiveConnections) {
     context.strokeStyle = 'rgba(61, 214, 190, 0.8)'
     context.lineWidth = 1

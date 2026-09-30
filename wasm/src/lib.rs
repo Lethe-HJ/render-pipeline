@@ -1,50 +1,96 @@
 use std::alloc::{alloc, dealloc, Layout};
 use std::slice;
 
-#[inline]
-fn edge(start: (f64, f64), end: (f64, f64), x: f64, y: f64) -> f64 {
-    (x - start.0) * (end.1 - start.1) - (y - start.1) * (end.0 - start.0)
+#[derive(Clone, Copy)]
+struct PreparedEdge {
+    start: (f64, f64),
+    end: (f64, f64),
+    min_y: f64,
+    max_y: f64,
+    inverse_slope: f64,
 }
 
-#[inline]
-fn is_top_left(start: (f64, f64), end: (f64, f64)) -> bool {
-    let delta_y = end.1 - start.1;
-    let delta_x = end.0 - start.0;
-    delta_y < 0.0 || (delta_y == 0.0 && delta_x > 0.0)
-}
+fn prepare_edges(points: &[(f64, f64)], path_ends: &[usize]) -> Option<Vec<PreparedEdge>> {
+    let mut edges = Vec::new();
+    let mut path_start = 0;
 
-#[inline]
-fn is_edge_inside(area: f64, value: f64, start: (f64, f64), end: (f64, f64)) -> bool {
-    if area < 0.0 {
-        value < 0.0 || (value == 0.0 && is_top_left(start, end))
-    } else if area > 0.0 {
-        value > 0.0 || (value == 0.0 && is_top_left(end, start))
-    } else {
-        false
+    for &path_end in path_ends {
+        if path_end < path_start || path_end > points.len() || path_end - path_start < 3 {
+            return None;
+        }
+        let path = &points[path_start..path_end];
+        for index in 0..path.len() {
+            let start = path[index];
+            let end = path[(index + 1) % path.len()];
+            let delta_y = end.1 - start.1;
+            edges.push(PreparedEdge {
+                start,
+                end,
+                min_y: start.1.min(end.1),
+                max_y: start.1.max(end.1),
+                inverse_slope: if delta_y == 0.0 {
+                    0.0
+                } else {
+                    (end.0 - start.0) / delta_y
+                },
+            });
+        }
+        path_start = path_end;
     }
+
+    if path_start != points.len() || edges.is_empty() {
+        return None;
+    }
+    Some(edges)
 }
 
-fn rasterize_triangle_into(
-    triangle: [(f64, f64); 3],
+#[inline]
+fn is_on_segment(edge: PreparedEdge, x: f64, y: f64) -> bool {
+    let cross = (x - edge.start.0) * (edge.end.1 - edge.start.1)
+        - (y - edge.start.1) * (edge.end.0 - edge.start.0);
+    cross == 0.0
+        && x >= edge.start.0.min(edge.end.0)
+        && x <= edge.start.0.max(edge.end.0)
+        && y >= edge.min_y
+        && y <= edge.max_y
+}
+
+#[inline]
+fn contains_point(edges: &[PreparedEdge], x: f64, y: f64) -> bool {
+    let mut inside = false;
+    for &edge in edges {
+        if is_on_segment(edge, x, y) {
+            return true;
+        }
+        if y >= edge.min_y && y < edge.max_y && edge.start.1 != edge.end.1 {
+            let intersection_x = edge.start.0 + (y - edge.start.1) * edge.inverse_slope;
+            if intersection_x > x {
+                inside = !inside;
+            }
+        }
+    }
+    inside
+}
+
+fn rasterize_paths_into(
+    points: &[(f64, f64)],
+    path_ends: &[usize],
     start: (f64, f64),
     step: f64,
     columns: u32,
     rows: u32,
-    output: &mut [f64],
+    output: &mut [u8],
 ) -> u32 {
     let Some(sample_count) = (columns as usize).checked_mul(rows as usize) else {
         return 0;
     };
-    let Some(weight_count) = sample_count.checked_mul(3) else {
-        return 0;
-    };
-    if output.len() < weight_count {
+    if output.len() < sample_count {
         return 0;
     }
-
-    let [first, second, third] = triangle;
-    let area = edge(first, second, third.0, third.1);
-    let inverse_area = if area == 0.0 { 0.0 } else { 1.0 / area };
+    let Some(edges) = prepare_edges(points, path_ends) else {
+        output[..sample_count].fill(0);
+        return 0;
+    };
     let mut inside_count = 0_u32;
     let mut grid_y = start.1;
 
@@ -53,23 +99,13 @@ fn rasterize_triangle_into(
         let mut grid_x = start.0;
         for column in 0..columns {
             let sample_x = grid_x + step / 2.0;
-            let first_edge = edge(second, third, sample_x, sample_y);
-            let second_edge = edge(third, first, sample_x, sample_y);
-            let third_edge = edge(first, second, sample_x, sample_y);
-            let output_index = ((row * columns + column) * 3) as usize;
+            let output_index = (row * columns + column) as usize;
 
-            if is_edge_inside(area, first_edge, second, third)
-                && is_edge_inside(area, second_edge, third, first)
-                && is_edge_inside(area, third_edge, first, second)
-            {
-                output[output_index] = first_edge * inverse_area;
-                output[output_index + 1] = second_edge * inverse_area;
-                output[output_index + 2] = third_edge * inverse_area;
+            if contains_point(&edges, sample_x, sample_y) {
+                output[output_index] = 1;
                 inside_count += 1;
             } else {
-                output[output_index] = -1.0;
-                output[output_index + 1] = 0.0;
-                output[output_index + 2] = 0.0;
+                output[output_index] = 0;
             }
 
             grid_x += step;
@@ -81,23 +117,22 @@ fn rasterize_triangle_into(
 }
 
 #[no_mangle]
-pub extern "C" fn allocate_weights(sample_count: u32) -> u32 {
-    let Some(weight_count) = (sample_count as usize).checked_mul(3) else {
+pub extern "C" fn allocate_points(point_count: u32) -> u32 {
+    let Some(value_count) = (point_count as usize).checked_mul(2) else {
         return 0;
     };
-    let Ok(layout) = Layout::array::<f64>(weight_count) else {
+    let Ok(layout) = Layout::array::<f64>(value_count) else {
         return 0;
     };
-
     unsafe { alloc(layout) as u32 }
 }
 
 #[no_mangle]
-pub extern "C" fn deallocate_weights(pointer: u32, sample_count: u32) {
-    let Some(weight_count) = (sample_count as usize).checked_mul(3) else {
+pub extern "C" fn deallocate_points(pointer: u32, point_count: u32) {
+    let Some(value_count) = (point_count as usize).checked_mul(2) else {
         return;
     };
-    let Ok(layout) = Layout::array::<f64>(weight_count) else {
+    let Ok(layout) = Layout::array::<f64>(value_count) else {
         return;
     };
     if pointer != 0 {
@@ -106,13 +141,47 @@ pub extern "C" fn deallocate_weights(pointer: u32, sample_count: u32) {
 }
 
 #[no_mangle]
-pub extern "C" fn rasterize_triangle(
-    first_x: f64,
-    first_y: f64,
-    second_x: f64,
-    second_y: f64,
-    third_x: f64,
-    third_y: f64,
+pub extern "C" fn allocate_path_ends(path_count: u32) -> u32 {
+    let Ok(layout) = Layout::array::<u32>(path_count as usize) else {
+        return 0;
+    };
+    unsafe { alloc(layout) as u32 }
+}
+
+#[no_mangle]
+pub extern "C" fn deallocate_path_ends(pointer: u32, path_count: u32) {
+    let Ok(layout) = Layout::array::<u32>(path_count as usize) else {
+        return;
+    };
+    if pointer != 0 {
+        unsafe { dealloc(pointer as *mut u8, layout) };
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn allocate_coverage(sample_count: u32) -> u32 {
+    let Ok(layout) = Layout::array::<u8>(sample_count as usize) else {
+        return 0;
+    };
+    unsafe { alloc(layout) as u32 }
+}
+
+#[no_mangle]
+pub extern "C" fn deallocate_coverage(pointer: u32, sample_count: u32) {
+    let Ok(layout) = Layout::array::<u8>(sample_count as usize) else {
+        return;
+    };
+    if pointer != 0 {
+        unsafe { dealloc(pointer as *mut u8, layout) };
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn rasterize_paths(
+    points_pointer: u32,
+    point_count: u32,
+    path_ends_pointer: u32,
+    path_count: u32,
     start_x: f64,
     start_y: f64,
     step: f64,
@@ -120,19 +189,36 @@ pub extern "C" fn rasterize_triangle(
     rows: u32,
     output_pointer: u32,
 ) -> u32 {
+    if points_pointer == 0
+        || path_ends_pointer == 0
+        || output_pointer == 0
+        || point_count == 0
+        || path_count == 0
+        || columns == 0
+        || rows == 0
+    {
+        return 0;
+    }
+    let Some(value_count) = (point_count as usize).checked_mul(2) else {
+        return 0;
+    };
     let Some(sample_count) = (columns as usize).checked_mul(rows as usize) else {
         return 0;
     };
-    let Some(weight_count) = sample_count.checked_mul(3) else {
-        return 0;
-    };
-    if output_pointer == 0 || weight_count == 0 {
-        return 0;
-    }
 
-    let output = unsafe { slice::from_raw_parts_mut(output_pointer as *mut f64, weight_count) };
-    rasterize_triangle_into(
-        [(first_x, first_y), (second_x, second_y), (third_x, third_y)],
+    let coordinate_values =
+        unsafe { slice::from_raw_parts(points_pointer as *const f64, value_count) };
+    let points: Vec<(f64, f64)> = coordinate_values
+        .chunks_exact(2)
+        .map(|point| (point[0], point[1]))
+        .collect();
+    let path_ends =
+        unsafe { slice::from_raw_parts(path_ends_pointer as *const u32, path_count as usize) };
+    let path_ends: Vec<usize> = path_ends.iter().map(|&end| end as usize).collect();
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer as *mut u8, sample_count) };
+    rasterize_paths_into(
+        &points,
+        &path_ends,
         (start_x, start_y),
         step,
         columns,
@@ -143,78 +229,90 @@ pub extern "C" fn rasterize_triangle(
 
 #[cfg(test)]
 mod tests {
-    use super::rasterize_triangle_into;
+    use super::{rasterize_paths_into, PreparedEdge};
 
     #[test]
-    fn classifies_samples_and_writes_barycentric_weights() {
-        let mut output = [0.0; 12];
-        let inside_count = rasterize_triangle_into(
-            [(0.0, 0.0), (8.0, 0.0), (0.0, 8.0)],
+    fn classifies_samples_inside_a_polygon() {
+        let mut output = [0; 9];
+        let inside_count = rasterize_paths_into(
+            &[(0.0, 0.0), (12.0, 0.0), (12.0, 12.0), (0.0, 12.0)],
+            &[4],
             (0.0, 0.0),
             4.0,
-            2,
-            2,
+            3,
+            3,
             &mut output,
         );
 
-        assert_eq!(inside_count, 1);
-        assert_eq!(&output[0..3], &[0.5, 0.25, 0.25]);
-        assert_eq!(output[3], -1.0);
-        assert_eq!(output[6], -1.0);
-        assert_eq!(output[9], -1.0);
+        assert_eq!(inside_count, 9);
+        assert_eq!(output, [1; 9]);
     }
 
     #[test]
-    fn supports_reversed_winding_and_skips_degenerate_triangles() {
-        let mut output = [0.0; 3];
-        let inside_count = rasterize_triangle_into(
-            [(0.0, 8.0), (8.0, 0.0), (0.0, 0.0)],
+    fn supports_holes_independent_of_ring_winding() {
+        let points = [
             (0.0, 0.0),
-            4.0,
-            1,
-            1,
-            &mut output,
-        );
-        assert_eq!(inside_count, 1);
-        assert!((output.iter().sum::<f64>() - 1.0).abs() < f64::EPSILON);
+            (12.0, 0.0),
+            (12.0, 12.0),
+            (0.0, 12.0),
+            (4.0, 4.0),
+            (8.0, 4.0),
+            (8.0, 8.0),
+            (4.0, 8.0),
+        ];
+        let mut output = [0; 9];
+        let inside_count =
+            rasterize_paths_into(&points, &[4, 8], (0.0, 0.0), 4.0, 3, 3, &mut output);
+        assert_eq!(inside_count, 8);
+        assert_eq!(output[4], 0);
 
-        let degenerate_count = rasterize_triangle_into(
-            [(0.0, 0.0), (8.0, 0.0), (16.0, 0.0)],
+        let reversed_hole = [
             (0.0, 0.0),
-            4.0,
-            1,
-            1,
-            &mut output,
-        );
-        assert_eq!(degenerate_count, 0);
-        assert_eq!(output[0], -1.0);
+            (12.0, 0.0),
+            (12.0, 12.0),
+            (0.0, 12.0),
+            (4.0, 8.0),
+            (8.0, 8.0),
+            (8.0, 4.0),
+            (4.0, 4.0),
+        ];
+        let reversed_count =
+            rasterize_paths_into(&reversed_hole, &[4, 8], (0.0, 0.0), 4.0, 3, 3, &mut output);
+        assert_eq!(reversed_count, inside_count);
     }
 
     #[test]
-    fn applies_top_left_rule_to_shared_edges() {
-        let mut first_output = [0.0; 12];
-        let mut second_output = [0.0; 12];
-        let first_count = rasterize_triangle_into(
-            [(0.0, 0.0), (8.0, 0.0), (8.0, 8.0)],
-            (0.0, 0.0),
-            4.0,
-            2,
-            2,
-            &mut first_output,
-        );
-        let second_count = rasterize_triangle_into(
-            [(0.0, 0.0), (8.0, 8.0), (0.0, 8.0)],
-            (0.0, 0.0),
-            4.0,
-            2,
-            2,
-            &mut second_output,
-        );
-
-        assert_eq!(first_count + second_count, 4);
-        assert!(first_output[0] >= 0.0);
-        assert_eq!(second_output[0], -1.0);
-        assert!(first_output[9] >= 0.0);
-        assert_eq!(second_output[9], -1.0);
+    fn classifies_points_on_polygon_edges_as_inside() {
+        let edges = [
+            PreparedEdge {
+                start: (0.0, 0.0),
+                end: (8.0, 0.0),
+                min_y: 0.0,
+                max_y: 0.0,
+                inverse_slope: 0.0,
+            },
+            PreparedEdge {
+                start: (8.0, 0.0),
+                end: (8.0, 8.0),
+                min_y: 0.0,
+                max_y: 8.0,
+                inverse_slope: 0.0,
+            },
+            PreparedEdge {
+                start: (8.0, 8.0),
+                end: (0.0, 8.0),
+                min_y: 8.0,
+                max_y: 8.0,
+                inverse_slope: 0.0,
+            },
+            PreparedEdge {
+                start: (0.0, 8.0),
+                end: (0.0, 0.0),
+                min_y: 0.0,
+                max_y: 8.0,
+                inverse_slope: 0.0,
+            },
+        ];
+        assert!(super::contains_point(&edges, 4.0, 0.0));
     }
 }
