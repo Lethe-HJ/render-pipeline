@@ -3,7 +3,13 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0",
+    "pnpm": ">=12"
+  },
   "scripts": {
+    "prepare": "sh scripts/prepare.sh",
     "dev": "pnpm --dir examples dev",
     "build": "pnpm wasm:build && tsc --noEmit && vite build",
     "test": ". \"$HOME/.cargo/env\" && cargo test --manifest-path wasm/Cargo.toml && pnpm wasm:build && node --experimental-strip-types --test tests/triangle-coverage.test.mjs",
