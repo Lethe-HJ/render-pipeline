@@ -1,4 +1,4 @@
-import { Layer, type Canvas2DContext } from './layer'
+import { createCanvasSurface, type Canvas2DContext, type CanvasSurface } from './canvas-surface'
 import type { PrimitiveRenderOptions } from './renderer-types'
 
 function drawPixelHelper(
@@ -48,11 +48,19 @@ function drawPixelHelper(
   }
 }
 
-export class HelperRenderer extends Layer {
+export class HelperRenderer {
+  readonly offscreenCanvas: CanvasSurface
+  readonly width: number
+  readonly height: number
+  private readonly context: Canvas2DContext
   private readonly options: PrimitiveRenderOptions
 
   constructor(width: number, height: number, options: PrimitiveRenderOptions) {
-    super(width, height)
+    this.width = width
+    this.height = height
+    const { surface, context } = createCanvasSurface(width, height)
+    this.offscreenCanvas = surface
+    this.context = context
     this.options = options
   }
 

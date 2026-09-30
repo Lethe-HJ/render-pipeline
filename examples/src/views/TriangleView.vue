@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { Canvas2dRenderer } from '@pipeline/render/triangle'
+import { PageCanvasRenderer } from '@pipeline/render/triangle'
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 
 function renderTriangle() {
   if (!canvas.value) return
-  new Canvas2dRenderer(canvas.value).render({
+  new PageCanvasRenderer(canvas.value).render({
     width: 760,
     height: 460,
     primitiveType: 'triangle',

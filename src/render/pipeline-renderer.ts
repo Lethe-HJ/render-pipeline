@@ -1,4 +1,4 @@
-import { Layer, type Canvas2DContext } from './layer'
+import { createCanvasSurface, type Canvas2DContext, type CanvasSurface } from './canvas-surface'
 import type { NormalizedVertex, PrimitiveRenderOptions, VertexColor } from './renderer-types'
 
 interface VertexOutput extends NormalizedVertex {}
@@ -77,11 +77,19 @@ function rasterizeTriangle(
   }
 }
 
-export class PipeLineRenderer extends Layer {
+export class PipeLineRenderer {
+  readonly offscreenCanvas: CanvasSurface
+  readonly width: number
+  readonly height: number
+  private readonly context: Canvas2DContext
   private readonly options: PrimitiveRenderOptions
 
   constructor(width: number, height: number, options: PrimitiveRenderOptions) {
-    super(width, height)
+    this.width = width
+    this.height = height
+    const { surface, context } = createCanvasSurface(width, height)
+    this.offscreenCanvas = surface
+    this.context = context
     this.options = options
   }
 
