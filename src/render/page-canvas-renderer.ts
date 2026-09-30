@@ -9,7 +9,7 @@ export class PageCanvasRenderer {
     this.target = target
   }
 
-  render(options: Canvas2dRenderOptions): void {
+  async render(options: Canvas2dRenderOptions): Promise<void> {
     const width = options.width ?? (this.target.width || this.target.clientWidth || 640)
     const height = options.height ?? (this.target.height || this.target.clientHeight || 400)
 
@@ -23,7 +23,7 @@ export class PageCanvasRenderer {
     const helperRenderer = new HelperRenderer(width, height, options)
     const pipeLineRenderer = new PipeLineRenderer(width, height, options)
     helperRenderer.render()
-    pipeLineRenderer.render()
+    await pipeLineRenderer.render()
 
     const context = this.target.getContext('2d')
     if (!context) {

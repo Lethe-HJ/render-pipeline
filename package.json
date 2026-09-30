@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm --dir examples dev",
-    "build": "tsc --noEmit && vite build",
+    "build": "pnpm wasm:build && tsc --noEmit && vite build",
+    "test": ". \"$HOME/.cargo/env\" && cargo test --manifest-path wasm/Cargo.toml && pnpm wasm:build && node --experimental-strip-types --test tests/triangle-coverage.test.mjs",
+    "test:wasm": "pnpm test",
+    "wasm:build": ". \"$HOME/.cargo/env\" && cargo build --manifest-path wasm/Cargo.toml --target wasm32-unknown-unknown --release && cp wasm/target/wasm32-unknown-unknown/release/triangle_coverage_wasm.wasm src/render/triangle-coverage.wasm",
     "preview": "pnpm --dir examples preview"
   },
   "devDependencies": {

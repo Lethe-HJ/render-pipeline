@@ -9,4 +9,9 @@ export default defineConfig({
       '@pipeline': new URL('../src', import.meta.url).pathname,
     },
   },
+  server: {
+    fs: {
+      allow: [new URL('..', import.meta.url).pathname],
+    },
+  },
 })
