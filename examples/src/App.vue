@@ -25,10 +25,5 @@ import { demos } from './router'
     <main class="page-frame">
       <RouterView />
     </main>
-
-    <footer class="footer">
-      <span>Render Pipeline / Examples</span>
-      <span>Web Canvas experiments</span>
-    </footer>
   </div>
 </template>
