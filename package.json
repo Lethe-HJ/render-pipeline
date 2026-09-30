@@ -1,0 +1,15 @@
+{
+  "name": "render-pipeline",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --dir examples dev",
+    "build": "tsc --noEmit && vite build",
+    "preview": "pnpm --dir examples preview"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}
